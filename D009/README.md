@@ -1,55 +1,33 @@
-# D009 — 데이터 품질 진단 및 EDA 보고서
+# KBO 팬 데이터 정제·집계 보고서
 
-## 사용 데이터
-**선택 2. 외부 데이터** — KBO 팬 멤버십/구매 실습용 샘플 데이터 (`data/kbo_fan_data_sample.csv`)
+## 1. 데이터 개요
 
-Kaggle이나 공공데이터포털 데이터가 아니라 커리큘럼 실습을 위해 제공된 합성(synthetic) 데이터입니다.
-자세한 출처와 선정 이유는 [`data/source_note.md`](./data/source_note.md)를 참고해 주세요.
+* 출처: (실습용 합성 데이터) KBO 팬 멤버십/구매 로그 — 자세한 내용은 `data/source_note.md` 참고
+* 기간: join_date 2015-01-01 ~ 2024-12-30 (가입일 기준)
+* 원본 행 수 / 정제 후 행 수: (5,075)행 → (4,887)행
 
-> ⚠️ 원본 데이터에는 `email` 컬럼이 있었지만, 개인정보 보호를 위해 분석 시작 전 **컬럼 자체를 제거**한
-> 뒤 진행했습니다. 이 폴더에 올라간 CSV도 email이 제거된 버전입니다.
+## 2. 발견한 품질 문제
 
-## 노트북
-[`D009_data_quality_eda_report.ipynb`](./D009_data_quality_eda_report.ipynb)
+* 결측: membership_tier 5.02% / sns_follow_yn 10.27% / region 4.02%
+* 중복: 완전 중복 50건 + 동일 customer_id인데 값이 다른 25건 (총 75건)
+* 이상치: total_spent 2.33% / attended_games 0.45% (IQR 기준)
+* 표기 혼재: region 70종(`Seoul` / `SEOUL` / `Seoul City` / `seoul-si`) → favorite_team 50종(`doosan bears` / `DoosanBears`)
 
-위에서부터 아래로 오류 없이 실행되며, 아래 순서로 구성되어 있습니다.
+## 3. 처리 결정과 근거 (5줄로)
 
-1. 데이터 개요 (출처·관측 단위·주요 컬럼 설명)
-2. 데이터 품질 진단 (`quality_report_full()` 결과 + 표기 혼재 직접 확인)
-3. 정제 과정과 판단 근거 (중복 → 문자열 → 날짜 → 이상치 → 결측치, `.pipe()`로 연결, 결정 로그 5건)
-4. EDA 결과 (단일 변수 분포, 구단별 비교, 가입연도별 추이, 멤버십 등급별 KPI + 인사이트 2건)
-5. 결과 저장 (Parquet vs CSV 용량 비교)
-6. 한계와 후속 질문
+1. 중복 행 50건 → 완전 동일한 행은 시스템 입력 오류로 간주, 제거. 이후 남은 동일 customer_id 25건은 같은 고객의 다른 시점 스냅샷으로 보고, 가장 최근 값만 남깁니다.
+2. region/favorite_team 공백·대소문자·접미사 표기 → 표준 명칭으로 통일 (region 70종→10종, favorite_team 50종→10종)
+3. join_date/last_purchase_date 날짜 포맷 4종 혼재 → 표기 패턴별로 구분해 datetime으로 변환
+4. age(0~100 밖) 8건, purchase_count(음수) 15건 → 결측 처리. total_spent 상단 이상치는 VIP 고액 소비 가능성으로 유지(제거하지 않음)
+5. purchase_count 결측 113건 → 제거 (이유: 구매 KPI 핵심 지표라 결측 시 집계 왜곡). 그 외 인구통계/부가정보 컬럼은 'Unknown' 처리 후 유지
 
-## 정제 요약
+## 4. 주요 KPI 결과 (2줄)
 
-| 항목 | 정제 전 | 정제 후 |
-|---|---|---|
-| 행 수 | 5,075 | 4,887 |
-| region 표기 종류 | 70종 | 10종 |
-| favorite_team 표기 종류 | 50종 | 10종 |
-| season_ticket_yn 표기 종류 | 8종 | 2종 (0/1) |
-| join_date / last_purchase_date 자료형 | object | datetime64[ns] |
+* (지역·월 관점) 매출이 가장 컸던 조합: 2018-02 "Seoul" (총 7,909,463원)
+* (구단 관점) 평균 지출 1위 구단: NC Dinos (팬 393명, 평균 287,656원)
 
-## 핵심 인사이트
-1. 팬 수가 가장 많은 구단(LG Twins)과 팬 1인당 평균 지출이 가장 높은 구단(NC Dinos)이 서로 다르다.
-2. 멤버십 등급(Bronze~VIP)과 평균 지출액이 뚜렷한 정비례 관계를 보이지 않는다 — 등급 산정 기준에 대한
-   후속 확인이 필요하다.
+## 5. 한계와 후속 작업
 
-## 폴더 구조
-```
-D009/
-├── D009_data_quality_eda_report.ipynb
-├── README.md
-├── data/
-│   ├── kbo_fan_data_sample.csv   # email 컬럼 제거된 버전
-│   └── source_note.md
-└── outputs/
-    ├── cleaned_data.parquet
-    ├── kpi_team_summary.parquet
-    ├── kpi_membership_summary.parquet
-    ├── kpi_year_trend_summary.parquet
-    ├── eda_total_spent_hist.png
-    ├── eda_team_avg_spent_bar.png
-    └── eda_year_trend.png
-```
+* membership_tier와 평균 지출액이 정비례하지 않는 원인 분석 필요 (등급 산정 기준 확인)
+* sns_follow_yn·membership_tier 결측 원인 분석 필요
+* 구단 성적, 시즌별 프로모션 등 외부 데이터 추가 수집 필요
